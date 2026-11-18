@@ -6,9 +6,8 @@ import { clearRedirectGuard, registerRedirect } from "@/utils/redirect-guard";
 import { clearOwnTimeout, ownTimerIds, setOwnTimeout } from "@/utils/timers";
 
 const DURATION_MS = 2000;
+/** Единственный безопасный fallback: /sign-in/ снова запускает OAuth → consent → петля. */
 const DEFAULT_PATH = "/";
-/** Чистый вход без OAuth error-параметров — выход из битого callback. */
-const SAFE_AUTH_URL = "/sign-in/";
 const STYLE_ID = "vvsu-tweaks-consent-skip-style";
 const OVERLAY_ID = "vvsu-tweaks-consent-skip-overlay";
 const ROOT_CLASS = "vvsu-tweaks-consent-skip-active";
@@ -16,6 +15,13 @@ const PLAY_CLASS = "vvsu-play";
 const GUARD_SCOPE = "consent-skip";
 const COOLDOWN_KEY = "vvsu-tweaks.consent-skip.cooldown";
 const COOLDOWN_MS = 60_000;
+/** Один автопереход с consent за окно — второй визит только вручную. */
+const AUTO_USED_KEY = "vvsu-tweaks.consent-skip.auto-used";
+const AUTO_USED_MS = 120_000;
+/** Debug-only: исходный callback до sanitize (DevTools / sessionStorage). */
+const ORIGINAL_CALLBACK_KEY = "vvsu-tweaks.consent-skip.original-callback";
+const GUARD_WINDOW_MS = 60_000;
+const GUARD_MAX_HOPS = 3;
 
 const HEART_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5
@@ -53,6 +59,8 @@ function rawCallbackParam(): string | null {
 export function isUnsafeCallback(url: URL): boolean {
   if (url.origin !== location.origin) return true;
   if (/\/consent-student\.html/i.test(url.pathname)) return true;
+  // /sign-in/ всегда рестартит OAuth и может вернуть на consent → петля
+  if (/\/sign-in\/?$/i.test(url.pathname)) return true;
 
   const params = url.searchParams;
   if (params.has("error") || params.has("error_description")) return true;
@@ -85,10 +93,10 @@ export function resolveRedirectPlan(): RedirectPlan {
     const url = new URL(callback, location.origin);
     if (isUnsafeCallback(url)) {
       console.warn(
-        "[vvsu-tweaks] consent-skip: unsafe callback_url, using clean sign-in",
+        "[vvsu-tweaks] consent-skip: unsafe callback_url, using /",
         url.pathname + url.search,
       );
-      return { url: sameOriginUrl(SAFE_AUTH_URL), fromCallback: false };
+      return { url: sameOriginUrl(DEFAULT_PATH), fromCallback: false };
     }
     return { url: url.href, fromCallback: true };
   } catch {
@@ -96,13 +104,13 @@ export function resolveRedirectPlan(): RedirectPlan {
   }
 }
 
-function isCooldownActive(): boolean {
+function readUntilFlag(key: string): boolean {
   try {
-    const raw = sessionStorage.getItem(COOLDOWN_KEY);
+    const raw = sessionStorage.getItem(key);
     if (!raw) return false;
     const until = Number(raw);
     if (!Number.isFinite(until) || Date.now() >= until) {
-      sessionStorage.removeItem(COOLDOWN_KEY);
+      sessionStorage.removeItem(key);
       return false;
     }
     return true;
@@ -111,20 +119,48 @@ function isCooldownActive(): boolean {
   }
 }
 
-function armCooldown(reason: string): void {
+function armUntilFlag(key: string, ttlMs: number): void {
   try {
-    sessionStorage.setItem(COOLDOWN_KEY, String(Date.now() + COOLDOWN_MS));
+    sessionStorage.setItem(key, String(Date.now() + ttlMs));
   } catch {
     /* ignore */
   }
+}
+
+function isCooldownActive(): boolean {
+  return readUntilFlag(COOLDOWN_KEY);
+}
+
+function armCooldown(reason: string): void {
+  armUntilFlag(COOLDOWN_KEY, COOLDOWN_MS);
   console.warn(`[vvsu-tweaks] consent-skip: cooldown ${COOLDOWN_MS}ms — ${reason}`);
 }
 
-/** Сброс петли/cooldown — вызывать при осознанном «Войти снова». */
+/** @internal exported for unit tests */
+export function hasConsentAutoBeenUsed(): boolean {
+  return readUntilFlag(AUTO_USED_KEY);
+}
+
+function markConsentAutoUsed(): void {
+  armUntilFlag(AUTO_USED_KEY, AUTO_USED_MS);
+}
+
+function rememberOriginalCallback(raw: string): void {
+  try {
+    sessionStorage.setItem(ORIGINAL_CALLBACK_KEY, raw.slice(0, 2000));
+  } catch {
+    /* ignore */
+  }
+  console.info("[vvsu-tweaks] consent-skip: original callback saved", raw.slice(0, 300));
+}
+
+/** Сброс one-shot / cooldown / guard. В проде не вызывается — флаги живут по TTL. */
 export function resetConsentSkipGuards(): void {
   clearRedirectGuard(GUARD_SCOPE);
   try {
     sessionStorage.removeItem(COOLDOWN_KEY);
+    sessionStorage.removeItem(AUTO_USED_KEY);
+    sessionStorage.removeItem(ORIGINAL_CALLBACK_KEY);
   } catch {
     /* ignore */
   }
@@ -146,17 +182,21 @@ function killPageTimers(): void {
 
 function neutralizeNativeConsent(): void {
   killPageTimers();
-  sanitizeConsentLocation(SAFE_AUTH_URL);
-  hardenNativeConsentCta(SAFE_AUTH_URL);
+  sanitizeConsentLocation(DEFAULT_PATH);
+  hardenNativeConsentCta(DEFAULT_PATH);
 }
 
 /** Патчим нативный CTA, чтобы ручной клик тоже не ушёл в error-callback. */
 function hardenNativeConsentCta(safeUrl: string): void {
-  const links = document.querySelectorAll<HTMLAnchorElement>("a.consent-cta[href]");
+  const links = document.querySelectorAll<HTMLAnchorElement>(
+    "a.consent-cta[href], a#consentCta[href]",
+  );
   for (const link of links) {
     try {
       const href = link.getAttribute("href");
       if (!href) continue;
+      // Официальная форма согласия — не трогаем
+      if (href.includes("api.vvsu.ru/consent/")) continue;
       const url = new URL(href, location.origin);
       if (isUnsafeCallback(url)) {
         link.setAttribute("href", safeUrl);
@@ -169,7 +209,7 @@ function hardenNativeConsentCta(safeUrl: string): void {
 
 /**
  * Подменяем callback_url в адресной строке — нативный таймер/JS consent-student
- * часто читает location.search и иначе снова утащит на error-URL.
+ * читает location.search и иначе утащит на error-/sign-in URL.
  */
 function sanitizeConsentLocation(safeUrl: string): void {
   try {
@@ -177,6 +217,8 @@ function sanitizeConsentLocation(safeUrl: string): void {
     if (!current) return;
     const parsed = new URL(current, location.origin);
     if (!isUnsafeCallback(parsed)) return;
+
+    rememberOriginalCallback(current);
 
     const next = new URL(location.href);
     next.search = `callback_url=${encodeURIComponent(sameOriginUrl(safeUrl))}`;
@@ -414,12 +456,30 @@ html.${DARK_THEME_CLASS} #${OVERLAY_ID}::before {
   );
 }
 
+/**
+ * Автопереход уже был / cooldown — без нашего оверлея: гасим нативный
+ * countdown, callback держим на /, пользователь видит штатную страницу.
+ */
+function leaveNativeConsent(reason: string): void {
+  console.info(`[vvsu-tweaks] consent-skip: leave native — ${reason}`);
+  sanitizeConsentLocation(DEFAULT_PATH);
+  hardenNativeConsentCta(DEFAULT_PATH);
+  setOwnTimeout(neutralizeNativeConsent, 1200);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", neutralizeNativeConsent, {
+      once: true,
+    });
+  } else {
+    neutralizeNativeConsent();
+  }
+}
+
 function startConsentSkip(): void {
   const plan = resolveRedirectPlan();
   if (!plan.fromCallback) {
-    sanitizeConsentLocation(SAFE_AUTH_URL);
+    sanitizeConsentLocation(DEFAULT_PATH);
   }
-  hardenNativeConsentCta(SAFE_AUTH_URL);
+  hardenNativeConsentCta(DEFAULT_PATH);
 
   let cancelled = false;
   let redirectTimer: number | null = null;
@@ -440,14 +500,14 @@ function startConsentSkip(): void {
       redirectTimer = null;
     }
     cleanup();
-    sanitizeConsentLocation(SAFE_AUTH_URL);
-    hardenNativeConsentCta(SAFE_AUTH_URL);
+    // Отмена / abort = one-shot потрачен; гасим нативный countdown, callback на /
+    markConsentAutoUsed();
+    neutralizeNativeConsent();
   };
 
   const abortLoop = (reason: string) => {
     armCooldown(reason);
     cancelAndRestore();
-    neutralizeNativeConsent();
   };
 
   const redirect = () => {
@@ -456,8 +516,8 @@ function startConsentSkip(): void {
     const from = location.pathname + location.search;
     const guard = registerRedirect(from, plan.url, {
       scope: GUARD_SCOPE,
-      maxHops: 3,
-      windowMs: 12_000,
+      maxHops: GUARD_MAX_HOPS,
+      windowMs: GUARD_WINDOW_MS,
     });
 
     if (!guard.allowed) {
@@ -465,6 +525,8 @@ function startConsentSkip(): void {
       return;
     }
 
+    // Помечаем до replace: после навигации sessionStorage уже виден следующему заходу
+    markConsentAutoUsed();
     location.replace(plan.url);
   };
 
@@ -509,20 +571,12 @@ export const consentSkip: Feature = {
     if (!isConsentPage()) return;
 
     if (isCooldownActive()) {
-      console.info("[vvsu-tweaks] consent-skip: cooldown active, leaving native page");
-      sanitizeConsentLocation(SAFE_AUTH_URL);
-      hardenNativeConsentCta(SAFE_AUTH_URL);
+      leaveNativeConsent("cooldown");
+      return;
+    }
 
-      // Второй pass после того, как страница успеет поставить countdown.
-      setOwnTimeout(neutralizeNativeConsent, 1200);
-
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", neutralizeNativeConsent, {
-          once: true,
-        });
-      } else {
-        neutralizeNativeConsent();
-      }
+    if (hasConsentAutoBeenUsed()) {
+      leaveNativeConsent("auto already used");
       return;
     }
 

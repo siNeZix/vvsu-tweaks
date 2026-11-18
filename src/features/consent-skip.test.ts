@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  hasConsentAutoBeenUsed,
   isUnsafeCallback,
   resetConsentSkipGuards,
   resolveRedirectPlan,
+  consentSkip,
 } from "./consent-skip";
 import { mockLocation, useCleanDom } from "@/test/helpers";
 
@@ -34,6 +36,17 @@ describe("isUnsafeCallback", () => {
     });
   });
 
+  it("режет /sign-in/ — рестарт OAuth даёт петлю с consent", () => {
+    withCabinetOrigin(() => {
+      expect(
+        isUnsafeCallback(new URL("https://cabinet.vvsu.ru/sign-in/", origin)),
+      ).toBe(true);
+      expect(
+        isUnsafeCallback(new URL("https://cabinet.vvsu.ru/sign-in", origin)),
+      ).toBe(true);
+    });
+  });
+
   it("режет error-параметры и access_denied", () => {
     withCabinetOrigin(() => {
       expect(
@@ -44,7 +57,7 @@ describe("isUnsafeCallback", () => {
       expect(
         isUnsafeCallback(
           new URL(
-            "https://cabinet.vvsu.ru/sign-in/?error_description=consent+verifier",
+            "https://cabinet.vvsu.ru/student/?error_description=consent+verifier",
             origin,
           ),
         ),
@@ -111,7 +124,7 @@ describe("resolveRedirectPlan", () => {
     restore();
   });
 
-  it("подменяет unsafe callback на /sign-in/", () => {
+  it("подменяет unsafe callback на /, никогда не на /sign-in/", () => {
     const restore = mockLocation({
       hostname: "cabinet.vvsu.ru",
       origin: "https://cabinet.vvsu.ru",
@@ -122,7 +135,23 @@ describe("resolveRedirectPlan", () => {
     });
 
     expect(resolveRedirectPlan()).toEqual({
-      url: "https://cabinet.vvsu.ru/sign-in/",
+      url: "https://cabinet.vvsu.ru/",
+      fromCallback: false,
+    });
+    restore();
+  });
+
+  it("чистый /sign-in/ в callback тоже уходит на /", () => {
+    const restore = mockLocation({
+      hostname: "cabinet.vvsu.ru",
+      origin: "https://cabinet.vvsu.ru",
+      pathname: "/consent-student.html",
+      search: "?callback_url=https%3A%2F%2Fcabinet.vvsu.ru%2Fsign-in%2F",
+      href: "https://cabinet.vvsu.ru/consent-student.html?callback_url=https%3A%2F%2Fcabinet.vvsu.ru%2Fsign-in%2F",
+    });
+
+    expect(resolveRedirectPlan()).toEqual({
+      url: "https://cabinet.vvsu.ru/",
       fromCallback: false,
     });
     restore();
@@ -145,17 +174,46 @@ describe("resolveRedirectPlan", () => {
   });
 });
 
+describe("consent auto one-shot", () => {
+  it("второй заход на consent не стартует автопереход и без оверлея", () => {
+    const restore = mockLocation({
+      hostname: "cabinet.vvsu.ru",
+      origin: "https://cabinet.vvsu.ru",
+      pathname: "/consent-student.html",
+      search: "?callback_url=https%3A%2F%2Fcabinet.vvsu.ru%2Fstudent%2F",
+      href: "https://cabinet.vvsu.ru/consent-student.html?callback_url=https%3A%2F%2Fcabinet.vvsu.ru%2Fstudent%2F",
+    });
+
+    sessionStorage.setItem(
+      "vvsu-tweaks.consent-skip.auto-used",
+      String(Date.now() + 60_000),
+    );
+    expect(hasConsentAutoBeenUsed()).toBe(true);
+
+    consentSkip.run();
+
+    expect(document.getElementById("vvsu-tweaks-consent-skip-overlay")).toBeNull();
+    expect(
+      document.documentElement.classList.contains("vvsu-tweaks-consent-skip-active"),
+    ).toBe(false);
+
+    restore();
+  });
+});
+
 describe("resetConsentSkipGuards", () => {
-  it("чистит cooldown и redirect-guard scope", () => {
+  it("чистит cooldown, auto-used и redirect-guard scope", () => {
     sessionStorage.setItem("vvsu-tweaks.consent-skip.cooldown", String(Date.now() + 99999));
+    sessionStorage.setItem("vvsu-tweaks.consent-skip.auto-used", String(Date.now() + 99999));
     sessionStorage.setItem(
       "vvsu-tweaks.redirect-guard:consent-skip",
-      JSON.stringify({ startedAt: Date.now(), hops: 9, lastFrom: "", lastTo: "" }),
+      JSON.stringify({ times: [Date.now()], lastFrom: "", lastTo: "" }),
     );
 
     resetConsentSkipGuards();
 
     expect(sessionStorage.getItem("vvsu-tweaks.consent-skip.cooldown")).toBeNull();
+    expect(sessionStorage.getItem("vvsu-tweaks.consent-skip.auto-used")).toBeNull();
     expect(sessionStorage.getItem("vvsu-tweaks.redirect-guard:consent-skip")).toBeNull();
   });
 });

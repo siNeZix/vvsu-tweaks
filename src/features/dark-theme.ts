@@ -415,6 +415,9 @@ html.${ROOT_CLASS} {
   --vvsu-text-muted: #9aadc2;
   --vvsu-border: #2a3b52;
   --vvsu-shadow: rgba(0, 0, 0, 0.45);
+  /* шаблон www/cabinet: баннер .cookie и карточки на var(--card-color) */
+  --card-color: #1a2740;
+  --card-text-contrast-color: #e6edf5;
   /* Bootstrap 5 (OpenID / fort): компоненты на var(--bs-*) */
   --bs-body-bg: #0e1621;
   --bs-body-bg-rgb: 14, 22, 33;
@@ -1731,6 +1734,55 @@ html.${ROOT_CLASS} .body-footer a,
 html.${ROOT_CLASS} .scookie a,
 html.${ROOT_CLASS} .tech-support a {
   color: var(--vvsu-blue-soft) !important;
+}
+
+/*
+ * Баннер cookie (www/cabinet): светлый --card-color + наследование
+ * color от тёмной темы → обычный текст пропадает, остаются только ссылки.
+ */
+html.${ROOT_CLASS} .cookie,
+html.${ROOT_CLASS} .js-cookie {
+  --card-color: var(--vvsu-bg-card);
+  background-color: var(--vvsu-bg-card) !important;
+  background: var(--vvsu-bg-card) !important;
+  color: var(--vvsu-text) !important;
+  border-top: 1px solid var(--vvsu-border);
+  box-shadow: 0 -8px 28px var(--vvsu-shadow);
+}
+
+html.${ROOT_CLASS} .cookie h4,
+html.${ROOT_CLASS} .cookie__content,
+html.${ROOT_CLASS} .cookie__content-wrapper,
+html.${ROOT_CLASS} .cookie__content-text,
+html.${ROOT_CLASS} .cookie p {
+  color: var(--vvsu-text) !important;
+}
+
+html.${ROOT_CLASS} .cookie a,
+html.${ROOT_CLASS} .js-cookie a,
+html.${ROOT_CLASS} .cookie__content-text a {
+  color: var(--vvsu-blue-soft) !important;
+}
+
+html.${ROOT_CLASS} .cookie a:hover,
+html.${ROOT_CLASS} .js-cookie a:hover {
+  color: #9fd0ff !important;
+}
+
+html.${ROOT_CLASS} .cookie .ui-main-button,
+html.${ROOT_CLASS} .cookie .js-cookie-accept,
+html.${ROOT_CLASS} .cookie button,
+html.${ROOT_CLASS} .js-cookie button {
+  background-color: var(--vvsu-blue) !important;
+  background: var(--vvsu-blue) !important;
+  border-color: var(--vvsu-blue) !important;
+  color: #fff !important;
+}
+
+html.${ROOT_CLASS} .cookie .ui-main-button__text,
+html.${ROOT_CLASS} .cookie .ui-main-button__inner,
+html.${ROOT_CLASS} .cookie .ui-main-button__circle {
+  color: #fff !important;
 }
 
 html.${ROOT_CLASS} .body-footer-socials,

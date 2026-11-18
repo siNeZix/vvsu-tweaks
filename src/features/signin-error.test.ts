@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { friendlyError, signinError } from "./signin-error";
+import { friendlyError, isSigninErrorLoop, signinError } from "./signin-error";
 import { mockLocation, useCleanDom } from "@/test/helpers";
 
 useCleanDom();
@@ -30,7 +30,7 @@ describe("friendlyError", () => {
 });
 
 describe("signinError feature", () => {
-  it("рисует оверлей для error в query", () => {
+  it("рисует оверлей для error в query, CTA на /", () => {
     const restore = mockLocation({
       hostname: "cabinet.vvsu.ru",
       origin: "https://cabinet.vvsu.ru",
@@ -45,11 +45,13 @@ describe("signinError feature", () => {
     expect(overlay).toBeTruthy();
     expect(overlay?.textContent).toContain("Вход отклонён");
     expect(overlay?.querySelector(".vvsu-se-btn")?.getAttribute("href")).toBe(
-      "https://cabinet.vvsu.ru/sign-in/",
+      "https://cabinet.vvsu.ru/",
     );
+    expect(overlay?.querySelector(".vvsu-se-btn")?.textContent).toMatch(/кабинет/i);
     expect(document.documentElement.classList.contains("vvsu-tweaks-signin-error-active")).toBe(
       true,
     );
+    expect(isSigninErrorLoop()).toBe(true);
 
     restore();
   });
@@ -68,7 +70,7 @@ describe("signinError feature", () => {
     restore();
   });
 
-  it("кнопка «Войти снова» сбрасывает guards и replace", () => {
+  it("кнопка «Открыть кабинет» идёт на / и не сбрасывает consent guards", () => {
     const restore = mockLocation({
       hostname: "cabinet.vvsu.ru",
       origin: "https://cabinet.vvsu.ru",
@@ -83,17 +85,46 @@ describe("signinError feature", () => {
       value: replace,
     });
 
+    sessionStorage.setItem(
+      "vvsu-tweaks.consent-skip.auto-used",
+      String(Date.now() + 60_000),
+    );
     sessionStorage.setItem("vvsu-tweaks.consent-skip.cooldown", "1");
     signinError.run();
 
     document.querySelector<HTMLAnchorElement>(".vvsu-se-btn")?.click();
-    expect(replace).toHaveBeenCalledWith("https://cabinet.vvsu.ru/sign-in/");
-    expect(sessionStorage.getItem("vvsu-tweaks.consent-skip.cooldown")).toBeNull();
+    expect(replace).toHaveBeenCalledWith("https://cabinet.vvsu.ru/");
+    expect(sessionStorage.getItem("vvsu-tweaks.consent-skip.auto-used")).not.toBeNull();
+    expect(sessionStorage.getItem("vvsu-tweaks.consent-skip.cooldown")).toBe("1");
 
     restore();
   });
 
-  it("«Войти снова» не уводит на чужой домен с пути //host/sign-in/", () => {
+  it("повторная ошибка показывает петлю", () => {
+    const restore = mockLocation({
+      hostname: "cabinet.vvsu.ru",
+      origin: "https://cabinet.vvsu.ru",
+      pathname: "/sign-in/",
+      search: "?error=access_denied",
+      href: "https://cabinet.vvsu.ru/sign-in/?error=access_denied",
+    });
+
+    sessionStorage.setItem(
+      "vvsu-tweaks.signin-error.seen",
+      String(Date.now() + 60_000),
+    );
+    // BOUND ещё не стоит — первый run в этом DOM
+    signinError.run();
+
+    expect(document.getElementById("vvsu-tweaks-signin-error")?.textContent).toContain(
+      "Петля входа",
+    );
+    expect(document.querySelector(".vvsu-se-btn")?.textContent).toMatch(/кабинет/i);
+
+    restore();
+  });
+
+  it("CTA на / не уводит на чужой домен", () => {
     const href = "https://cabinet.vvsu.ru//evil.example/sign-in/?error=access_denied";
     const restore = mockLocation({
       hostname: "cabinet.vvsu.ru",
@@ -107,6 +138,7 @@ describe("signinError feature", () => {
 
     const retry = document.querySelector(".vvsu-se-btn")?.getAttribute("href") ?? "";
     expect(new URL(retry).origin).toBe("https://cabinet.vvsu.ru");
+    expect(new URL(retry).pathname).toBe("/");
     restore();
   });
 

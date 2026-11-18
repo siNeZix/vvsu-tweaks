@@ -22,7 +22,26 @@ describe("redirect-guard", () => {
     expect(blocked.hops).toBe(4);
   });
 
-  it("сбрасывает окно по времени", () => {
+  it("скользящее окно: старые hop'ы выпадают, новые остаются", () => {
+    registerRedirect("/a", "/b", { maxHops: 3, windowMs: 10_000 });
+    vi.advanceTimersByTime(4000);
+    registerRedirect("/b", "/c", { maxHops: 3, windowMs: 10_000 });
+    vi.advanceTimersByTime(4000);
+    registerRedirect("/c", "/d", { maxHops: 3, windowMs: 10_000 });
+
+    // через 3с после третьего: первому hop'у 11с → выпал, hops=3 (2 старых + новый)
+    vi.advanceTimersByTime(3001);
+    const next = registerRedirect("/d", "/e", { maxHops: 3, windowMs: 10_000 });
+    expect(next.allowed).toBe(true);
+    expect(next.hops).toBe(3);
+
+    // ещё один сразу — блок
+    expect(registerRedirect("/e", "/f", { maxHops: 3, windowMs: 10_000 }).allowed).toBe(
+      false,
+    );
+  });
+
+  it("полный сброс окна, если все hop'ы устарели", () => {
     registerRedirect("/a", "/b", { maxHops: 2, windowMs: 1000 });
     registerRedirect("/b", "/c", { maxHops: 2, windowMs: 1000 });
 
@@ -30,6 +49,17 @@ describe("redirect-guard", () => {
     const next = registerRedirect("/c", "/d", { maxHops: 2, windowMs: 1000 });
     expect(next.allowed).toBe(true);
     expect(next.hops).toBe(1);
+  });
+
+  it("петля с паузами ~5с ловится (раньше fixed-window пропускал)", () => {
+    const opts = { maxHops: 3, windowMs: 60_000 };
+    expect(registerRedirect("/consent", "/", opts).allowed).toBe(true);
+    vi.advanceTimersByTime(5000);
+    expect(registerRedirect("/consent", "/", opts).allowed).toBe(true);
+    vi.advanceTimersByTime(5000);
+    expect(registerRedirect("/consent", "/", opts).allowed).toBe(true);
+    vi.advanceTimersByTime(5000);
+    expect(registerRedirect("/consent", "/", opts).allowed).toBe(false);
   });
 
   it("изолирует scope", () => {
@@ -51,5 +81,15 @@ describe("redirect-guard", () => {
   it("игнорирует битый JSON в sessionStorage", () => {
     sessionStorage.setItem("vvsu-tweaks.redirect-guard", "{not-json");
     expect(registerRedirect("/a", "/b").hops).toBe(1);
+  });
+
+  it("мигрирует legacy { startedAt, hops }", () => {
+    sessionStorage.setItem(
+      "vvsu-tweaks.redirect-guard",
+      JSON.stringify({ startedAt: Date.now(), hops: 2, lastFrom: "/a", lastTo: "/b" }),
+    );
+    const next = registerRedirect("/b", "/c", { maxHops: 3 });
+    expect(next.hops).toBe(3);
+    expect(next.allowed).toBe(true);
   });
 });

@@ -3,13 +3,15 @@ import { injectStyle } from "@/utils/dom";
 import { setOwnTimeout } from "@/utils/timers";
 import { DARK_THEME_CLASS } from "@/features/dark-theme";
 import { mountSettingsInto } from "@/features/settings-panel";
-import { resetConsentSkipGuards } from "@/features/consent-skip";
 
 const STYLE_ID = "vvsu-tweaks-signin-error-style";
 const OVERLAY_ID = "vvsu-tweaks-signin-error";
 const ROOT_CLASS = "vvsu-tweaks-signin-error-active";
 const BOUND = "data-vvsu-signin-error";
 const DUMP_WATCH_MS = 8000;
+/** Повторная ошибка входа в окне → петля, не «ещё один /sign-in/». */
+const ERROR_SEEN_KEY = "vvsu-tweaks.signin-error.seen";
+const ERROR_SEEN_MS = 120_000;
 /** OAuth error codes — snake_case ASCII. Всё прочее из URL не показываем. */
 const ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
 
@@ -126,23 +128,41 @@ function errorFromDump(): AuthErrorInfo | null {
 }
 
 /**
- * Чистый /sign-in/ того же origin, абсолютным URL: путь вида `//host/sign-in/`
- * в относительной форме увёл бы на чужой домен.
+ * Корень кабинета того же origin. Не /sign-in/: чистый sign-in рестартит OAuth
+ * и снова может вернуть на consent → петля. Если сессии нет, сервер сам
+ * отправит на вход по своей цепочке.
  */
 function resolveRetryHref(): string {
-  const url = new URL(location.href);
-  url.search = "";
-  url.hash = "";
-  const path = url.pathname.replace(/^\/{2,}/, "/");
-  if (!isSignInPath(path)) url.pathname = "/sign-in/";
-  else url.pathname = path.endsWith("/") ? path : `${path}/`;
-  return url.href;
+  return new URL("/", location.origin).href;
 }
 
-/** Сброс счётчиков петель + жёсткий переход на чистый /sign-in/ без error-query в истории. */
-function beginFreshSignIn(retryHref: string): void {
-  resetConsentSkipGuards();
+/** @internal exported for unit tests */
+export function isSigninErrorLoop(): boolean {
+  try {
+    const raw = sessionStorage.getItem(ERROR_SEEN_KEY);
+    if (!raw) return false;
+    const until = Number(raw);
+    if (!Number.isFinite(until) || Date.now() >= until) {
+      sessionStorage.removeItem(ERROR_SEEN_KEY);
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
+function markSigninErrorSeen(): void {
+  try {
+    sessionStorage.setItem(ERROR_SEEN_KEY, String(Date.now() + ERROR_SEEN_MS));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Переход на / без сброса consent-guard — one-shot должен остаться. */
+function beginFreshSignIn(retryHref: string): void {
+  markSigninErrorSeen();
   // replace: убираем error URL из history, чтобы «Назад» не вернул в тот же дамп
   location.replace(retryHref);
 }
@@ -464,7 +484,21 @@ function renderOverlay(info: AuthErrorInfo): void {
   const html = document.documentElement;
   injectErrorStyles();
   html.classList.add(ROOT_CLASS);
-  setTitleWhenHeadReady(`${info.title} · ВВГУ`);
+
+  const looping = isSigninErrorLoop();
+  markSigninErrorSeen();
+
+  const title = looping ? "Петля входа" : info.title;
+  const summary = looping
+    ? "Повторная ошибка за короткое время. Не открывайте /sign-in/ снова — сессия OAuth на fort.vvsu.ru, скорее всего, сломана. Откройте кабинет (/) или очистите cookie для cabinet.vvsu.ru и fort.vvsu.ru."
+    : info.summary;
+  const note = looping
+    ? "Твикер не сбрасывает защиту при переходе в кабинет, чтобы не крутить consent ↔ ошибка. Страницу оформил VVSU Tweaks."
+    : "Ошибку вернул сервер ВВГУ — твикер ни при чём. Отключать расширение не нужно. Страницу оформил VVSU Tweaks.";
+  // CTA всегда на / — не /sign-in/, иначе снова OAuth → consent
+  const primaryLabel = "Открыть кабинет";
+
+  setTitleWhenHeadReady(`${title} · ВВГУ`);
 
   const retryHref = resolveRetryHref();
 
@@ -476,12 +510,12 @@ function renderOverlay(info: AuthErrorInfo): void {
     '<div class="vvsu-se-shell">',
     '  <p class="vvsu-se-kicker">Личный кабинет · ВВГУ</p>',
     '  <section class="vvsu-se-panel" aria-labelledby="vvsu-se-title">',
-    `    <h1 class="vvsu-se-title" id="vvsu-se-title">${escapeHtml(info.title)}</h1>`,
-    `    <p class="vvsu-se-summary">${escapeHtml(info.summary)}</p>`,
+    `    <h1 class="vvsu-se-title" id="vvsu-se-title">${escapeHtml(title)}</h1>`,
+    `    <p class="vvsu-se-summary">${escapeHtml(summary)}</p>`,
     `    <p class="vvsu-se-meta">Код: ${escapeHtml(info.code)}</p>`,
-    '    <p class="vvsu-se-note">Ошибку вернул сервер ВВГУ — твикер ни при чём. Отключать расширение не нужно. Страницу оформил VVSU Tweaks.</p>',
+    `    <p class="vvsu-se-note">${escapeHtml(note)}</p>`,
     '    <div class="vvsu-se-actions">',
-    `      <a class="vvsu-se-btn" href="${escapeAttr(retryHref)}">Войти снова</a>`,
+    `      <a class="vvsu-se-btn" href="${escapeAttr(retryHref)}">${escapeHtml(primaryLabel)}</a>`,
     '      <a class="vvsu-se-link" href="https://www.vvsu.ru/">На сайт ВВГУ</a>',
     "    </div>",
     "  </section>",
@@ -507,7 +541,9 @@ function renderOverlay(info: AuthErrorInfo): void {
   const settingsSlot = overlay.querySelector<HTMLElement>(".vvsu-se-settings-slot");
   if (settingsSlot) mountSettingsInto(settingsSlot, "cabinet");
 
-  console.info("[vvsu-tweaks] signin-error: friendly page shown", info.code);
+  console.info("[vvsu-tweaks] signin-error: friendly page shown", info.code, {
+    looping,
+  });
 }
 
 /** Без <head> присвоение document.title игнорируется (а где-то бросает). */
