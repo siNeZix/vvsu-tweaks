@@ -13,9 +13,8 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "types": ["vite/client", "vite-plugin-monkey/client", "tampermonkey", "node"],
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src", "vite.config.ts", "vitest.config.ts"]
