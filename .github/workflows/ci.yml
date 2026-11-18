@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Релизный тег не прерываем на полпути публикации
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Assert tag ↔ package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/assert-version-sync.mjs --tag "$RELEASE_TAG"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Assert dist @version ↔ package.json
+        run: node scripts/assert-version-sync.mjs --dist
+
+      - name: Upload userscript artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vvsu-tweaks.user.js
+          path: dist/vvsu-tweaks.user.js
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: check
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download userscript artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vvsu-tweaks.user.js
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          prerelease=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$RELEASE_TAG" dist/vvsu-tweaks.user.js \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$RELEASE_TAG" \
+            --generate-notes \
+            --verify-tag \
+            "${prerelease[@]}"
+
+  publish:
+    name: Publish to Tampermonkey Hub
+    needs: check
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Download userscript artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vvsu-tweaks.user.js
+          path: dist
+
+      - name: Publish to thub.szxx.dad
+        env:
+          TMH_API_KEY: ${{ secrets.TMH_API_KEY }}
+          TMH_API_BASE: https://thub.szxx.dad/api/v1
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TMH_API_KEY:-}" ]; then
+            echo "::error::Secret TMH_API_KEY is missing. Create an admin key (tmh_a_…) on https://thub.szxx.dad/integrations and add it as repo secret TMH_API_KEY."
+            exit 1
+          fi
+
+          TAG_VERSION="${RELEASE_TAG#v}"
+          DIST_VERSION=$(grep -m1 -E '^// @version' dist/vvsu-tweaks.user.js | awk '{print $3}')
+          if [ "$DIST_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Refusing publish: tag $RELEASE_TAG ≠ dist @version $DIST_VERSION"
+            exit 1
+          fi
+
+          PAYLOAD=$(jq -n --rawfile code dist/vvsu-tweaks.user.js '{code: $code, is_public: true}')
+          # Без --retry: POST не идемпотентен, повтор может опубликовать дважды
+          RESP=$(curl -sS --max-time 60 \
+            -w "\n%{http_code}" -X POST "$TMH_API_BASE/scripts" \
+            -H "Authorization: Bearer $TMH_API_KEY" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: vvsu-tweaks-ci/github-actions" \
+            --data-binary @- <<< "$PAYLOAD")
+          HTTP_CODE=$(printf '%s\n' "$RESP" | tail -n1)
+          BODY=$(printf '%s\n' "$RESP" | sed '$d')
+
+          if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+            echo "::error::Hub publish failed with HTTP $HTTP_CODE"
+            printf '%s\n' "$BODY"
+            exit 1
+          fi
+          echo "$BODY" | jq .
+
+          HUB_VERSION=$(echo "$BODY" | jq -r '.version')
+          if [ "$HUB_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Hub returned version $HUB_VERSION, expected $TAG_VERSION"
+            exit 1
+          fi
+
+          INSTALL_URL=$(echo "$BODY" | jq -r '.install_url // empty')
+          echo "Published: $INSTALL_URL"
+          {
+            echo "### Published to Tampermonkey Hub"
+            echo "- Tag: \`$RELEASE_TAG\`"
+            echo "- Version: \`$HUB_VERSION\`"
+            echo "- Id: $(echo "$BODY" | jq -r '.id')"
+            echo "- Install: $INSTALL_URL"
+          } >> "$GITHUB_STEP_SUMMARY"

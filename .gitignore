@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+Thumbs.db
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Снимки страниц ВВГУ: содержат персональные данные (фото, ФИО, группа)
+refs/

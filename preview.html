@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VVSU Tweaks — preview</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", sans-serif;
+        background: #e8eef5;
+        color: #212529;
+      }
+      .header {
+        background: #fff;
+        box-shadow: 0 0 20px 0 rgba(0, 0, 0, 0.05);
+        padding: 0.75rem 0;
+      }
+      .header .container-inner {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 0 1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .heading a {
+        color: #0a56a4;
+        text-decoration: none;
+        font-weight: 600;
+        margin-left: 0.75rem;
+      }
+      .btn-top-nav {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        max-height: 32px;
+        height: 32px;
+        width: 38px;
+        border: 1px solid #0a56a4;
+        border-radius: 0.25rem;
+        color: #0a56a4;
+        background: transparent;
+        text-decoration: none;
+        transition: 0.2s ease;
+      }
+      .btn-top-nav:hover {
+        background: #0a56a4;
+        color: #fff;
+      }
+      .head-content {
+        background: #0a56a5;
+        padding: 2.5rem 1rem 4rem;
+      }
+      .container {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 0 1rem;
+      }
+      .card-border {
+        background: #fff;
+        border-radius: 8px;
+        margin-top: -2.5rem;
+        padding: 1rem;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.09);
+        display: flex;
+        flex-direction: column-reverse;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+      }
+      @media (min-width: 768px) {
+        .card-border {
+          flex-direction: row;
+        }
+      }
+      .person {
+        flex: 1;
+        width: 100%;
+      }
+      .fio h1 {
+        margin: 0 0 0.5rem;
+        color: #0a56a4;
+        font-size: 1.5rem;
+        text-align: center;
+      }
+      .line {
+        background: #e35321;
+        height: 2px;
+        margin: -3px auto 15px;
+        width: 100%;
+        max-width: 280px;
+      }
+      .avatar {
+        background-size: cover;
+        background-position: center;
+        width: 200px;
+        height: 200px;
+      }
+      .rounded-circle {
+        border-radius: 50% !important;
+      }
+      .ml-3 {
+        margin-left: 1rem;
+      }
+      .nav-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem;
+        list-style: none;
+        padding: 0;
+        margin: 1rem 0;
+      }
+      .nav-link {
+        display: inline-block;
+        padding: 0.5rem 0.85rem;
+        border: 1px solid #0f5baa;
+        border-radius: 0.25rem;
+        background: #fff;
+        color: #125ead;
+        text-decoration: none;
+      }
+      .card-cabinet {
+        background: #fff;
+        border-radius: 0.5rem;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.09);
+        padding: 1rem;
+        margin-bottom: 1rem;
+      }
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .table th,
+      .table td {
+        border: 1px solid #dee2e6;
+        padding: 0.6em;
+        text-align: left;
+      }
+      .thead-v-secondary th {
+        background: #e9ecef;
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+      .table-striped tbody tr:nth-of-type(odd) {
+        background: #f8f9fa;
+      }
+      .hint {
+        max-width: 960px;
+        margin: 1rem auto;
+        padding: 0 1rem;
+        color: #54657a;
+        font-size: 0.9rem;
+      }
+      .footer {
+        margin-top: 2rem;
+        color: #6c757d;
+        border-top: 1px solid #dde5ee;
+        background: #f8fafc;
+      }
+      .footer .d-flex {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .footer .p-4 {
+        padding: 1.25rem 1rem;
+      }
+      .footer .copyright {
+        font-size: 0.95rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header py-3">
+      <div class="container-inner">
+        <div class="d-flex align-items-center">
+          <div class="logo" style="font-weight: 700; color: #0a56a4">ВВГУ</div>
+          <div class="heading d-none d-md-block">
+            <a href="#">Личный кабинет студента</a>
+          </div>
+        </div>
+        <div class="d-flex align-items-center">
+          <div class="service">
+            <a class="btn btn-top-nav bvi-open" href="#" title="Версия для слабовидящих">
+              👁
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="head-content"></div>
+    <div class="container main-content">
+      <!-- структура как в refs: .photosecond > div > .avatar.rounded-circle -->
+      <div class="card-border bg-white">
+        <div class="person">
+          <div class="fio">
+            <h1 class="h3">Иванов Иван Иванович</h1>
+            <div class="line"></div>
+          </div>
+          <p>Локальный preview. Справа вверху — глазик BVI и кнопка тёмной темы. На аватаре — blur.</p>
+        </div>
+        <div class="photosecond">
+          <div>
+            <div
+              class="avatar rounded-circle ml-3"
+              style="
+                background-image: url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop stop-color=%22%236ebcfb%22/><stop offset=%221%22 stop-color=%22%230a56a4%22/></linearGradient></defs><rect width=%22200%22 height=%22200%22 fill=%22url(%23g)%22/><circle cx=%22100%22 cy=%2280%22 r=%2236%22 fill=%22%23ffe0c2%22/><ellipse cx=%22100%22 cy=%22170%22 rx=%2260%22 ry=%2248%22 fill=%22%23d9e8f8%22/><circle cx=%2288%22 cy=%2276%22 r=%224%22 fill=%22%23333%22/><circle cx=%22112%22 cy=%2276%22 r=%224%22 fill=%22%23333%22/><path d=%22M88 92 Q100 102 112 92%22 stroke=%22%23333%22 stroke-width=%223%22 fill=%22none%22 stroke-linecap=%22round%22/></svg>');
+              "
+            ></div>
+          </div>
+        </div>
+      </div>
+
+      <ul class="nav nav-pills mb-1">
+        <li class="nav-item"><a class="nav-link" href="#">Учебный план</a></li>
+        <li class="nav-item"><a class="nav-link" href="#">Расписание</a></li>
+        <li class="nav-item"><a class="nav-link" href="#">Оповещения</a></li>
+      </ul>
+
+      <div class="card card-cabinet">
+        <div class="card-body">
+          <h4>Расписание</h4>
+          <table class="table table-bordered table-striped table-cabinet">
+            <thead class="thead-v-secondary">
+              <tr>
+                <th>Время</th>
+                <th>Дисциплина</th>
+                <th>Преподаватель</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>08:30–10:00</td>
+                <td>Информационные системы</td>
+                <td><a href="#">Петров П.П.</a></td>
+              </tr>
+              <tr>
+                <td>10:15–11:45</td>
+                <td>Базы данных</td>
+                <td><a href="#">Сидорова А.А.</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <footer class="footer" id="footer">
+      <div class="container mt-3">
+        <div class="d-flex align-items-center justify-content-between p-4">
+          <div class="copyright">ВВГУ © 2026</div>
+          <div></div>
+        </div>
+      </div>
+    </footer>
+
+    <p class="hint">
+      Живой сайт: установи userscript с корня Vite, открой
+      <code>https://cabinet.vvsu.ru/</code>, разреши Local network access.
+    </p>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
